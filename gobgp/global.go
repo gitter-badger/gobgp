@@ -42,6 +42,7 @@ const (
 	MARK
 	ACTION
 	RT
+	ENCAP
 )
 
 var ExtCommNameMap = map[ExtCommType]string{
@@ -52,6 +53,7 @@ var ExtCommNameMap = map[ExtCommType]string{
 	MARK:     "mark",
 	ACTION:   "action",
 	RT:       "rt",
+	ENCAP:    "encap",
 }
 
 var ExtCommValueMap = map[string]ExtCommType{
@@ -62,6 +64,7 @@ var ExtCommValueMap = map[string]ExtCommType{
 	ExtCommNameMap[MARK]:     MARK,
 	ExtCommNameMap[ACTION]:   ACTION,
 	ExtCommNameMap[RT]:       RT,
+	ExtCommNameMap[ENCAP]:    ENCAP,
 }
 
 func rateLimitParser(args []string) ([]bgp.ExtendedCommunityInterface, error) {
@@ -158,6 +161,38 @@ func rtParser(args []string) ([]bgp.ExtendedCommunityInterface, error) {
 	return exts, nil
 }
 
+func encapParser(args []string) ([]bgp.ExtendedCommunityInterface, error) {
+	if len(args) < 2 || args[0] != ExtCommNameMap[ENCAP] {
+		return nil, fmt.Errorf("invalid encap")
+	}
+	var typ bgp.TunnelType
+	switch args[1] {
+	case "l2tpv3":
+		typ = bgp.TUNNEL_TYPE_L2TP3
+	case "gre":
+		typ = bgp.TUNNEL_TYPE_GRE
+	case "ip-in-ip":
+		typ = bgp.TUNNEL_TYPE_IP_IN_IP
+	case "vxlan":
+		typ = bgp.TUNNEL_TYPE_VXLAN
+	case "nvgre":
+		typ = bgp.TUNNEL_TYPE_NVGRE
+	case "mpls":
+		typ = bgp.TUNNEL_TYPE_MPLS
+	case "mpls-in-gre":
+		typ = bgp.TUNNEL_TYPE_MPLS_IN_GRE
+	case "vxlan-gre":
+		typ = bgp.TUNNEL_TYPE_VXLAN_GRE
+	default:
+		return nil, fmt.Errorf("invalid encap type")
+	}
+	isTransitive := true
+	o := bgp.NewOpaqueExtended(isTransitive)
+	o.SubType = bgp.EC_SUBTYPE_ENCAPSULATION
+	o.Value = &bgp.EncapExtended{typ}
+	return []bgp.ExtendedCommunityInterface{o}, nil
+}
+
 var ExtCommParserMap = map[ExtCommType]func([]string) ([]bgp.ExtendedCommunityInterface, error){
 	ACCEPT:   nil,
 	DISCARD:  rateLimitParser,
@@ -166,6 +201,7 @@ var ExtCommParserMap = map[ExtCommType]func([]string) ([]bgp.ExtendedCommunityIn
 	MARK:     markParser,
 	ACTION:   actionParser,
 	RT:       rtParser,
+	ENCAP:    encapParser,
 }
 
 func ParseExtendedCommunities(input string) ([]bgp.ExtendedCommunityInterface, error) {
@@ -280,11 +316,11 @@ func parseEvpnArgs(resource api.Resource, name, modtype string, args []string) (
 		switch resource {
 		case api.Resource_GLOBAL:
 			if len(args) < 6 || args[4] != "rd" || args[6] != "rt" {
-				return nil, "", nil, fmt.Errorf("usage: rib %s macadv <mac address> <ip address> <etag> <label> rd <rd> rt <rt>... -a evpn", modtype)
+				return nil, "", nil, fmt.Errorf("usage: rib %s macadv <mac address> <ip address> <etag> <label> rd <rd> rt <rt>... [encap <encap type>] -a evpn", modtype)
 			}
 		case api.Resource_VRF:
 			if len(args) < 4 {
-				return nil, "", nil, fmt.Errorf("usage: vrf %s rib %s macadv <mac address> <ip address> <etag> <label> -a evpn", name, modtype)
+				return nil, "", nil, fmt.Errorf("usage: vrf %s rib %s macadv <mac address> <ip address> <etag> <label> [encap <encap type>] -a evpn", name, modtype)
 			}
 		}
 		mac, err := net.ParseMAC(args[0])
@@ -316,6 +352,8 @@ func parseEvpnArgs(resource api.Resource, name, modtype string, args []string) (
 				return nil, "", nil, err
 			}
 			rts = args[6:]
+		} else {
+			rts = args[4:]
 		}
 
 		macIpAdv := &bgp.EVPNMacIPAdvertisementRoute{
@@ -335,11 +373,11 @@ func parseEvpnArgs(resource api.Resource, name, modtype string, args []string) (
 		switch resource {
 		case api.Resource_GLOBAL:
 			if len(args) < 5 || args[2] != "rd" || args[4] != "rt" {
-				return nil, "", nil, fmt.Errorf("usage : global rib %s multicast <ip address> <etag> rd <rd> rt <rt> -a evpn", modtype)
+				return nil, "", nil, fmt.Errorf("usage : global rib %s multicast <ip address> <etag> rd <rd> rt <rt>... [encap <encap type>] -a evpn", modtype)
 			}
 		case api.Resource_VRF:
 			if len(args) < 2 {
-				return nil, "", nil, fmt.Errorf("usage : vrf %s rib %s multicast <ip address> <etag> -a evpn", name, modtype)
+				return nil, "", nil, fmt.Errorf("usage : vrf %s rib %s multicast <ip address> <etag> [encap <encap type>] -a evpn", name, modtype)
 			}
 		}
 		if args[0] != "0.0.0.0" || args[0] != "::" {
@@ -365,6 +403,8 @@ func parseEvpnArgs(resource api.Resource, name, modtype string, args []string) (
 				return nil, "", nil, err
 			}
 			rts = args[4:]
+		} else {
+			rts = args[2:]
 		}
 
 		multicastEtag := &bgp.EVPNMulticastEthernetTagRoute{
